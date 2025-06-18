@@ -8,7 +8,6 @@ import math
 from typing import Tuple
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 
 # ---------------------------------------------------------------------
