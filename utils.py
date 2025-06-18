@@ -37,16 +37,40 @@ def round_qty(symbol: str, qty: float) -> float:
 
 
 # ---------------------------------------------------------------------
-# Parsing helpers
+# Symbol aliasing and parsing helpers
 # ---------------------------------------------------------------------
 
+# Some Binance futures contracts are issued in 100/1000-multiples (e.g. 1000PEPEUSDT).
+# The signal service might emit the plain symbol (PEPEUSDT). Map those here.
+ALIAS_MAP = {
+    "PEPEUSDT": "1000PEPEUSDT",
+    "ORDIUSDT": "1000ORDIUSDT",
+    "BONKUSDT": "1000BONKUSDT",
+    "WIFUSDT": "1000WIFUSDT",
+}
+
+
+def _resolve_alias(symbol: str) -> str:
+    """Return Binance-valid symbol, applying ALIAS_MAP if necessary."""
+    return ALIAS_MAP.get(symbol, symbol)
+
+
 def parse_signal(signal: dict) -> Tuple[str, str]:
-    """Return (symbol, side) tuple from signal object. Side = BUY/SELL."""
+    """Extract (binance_symbol, side) from signal.
+
+    Accepted signal["symbol"] forms:
+        DYMUSDT_LONG, PEPEUSDT_SHORT, etc.
+    Returns:
+        binance_symbol – resolved against ALIAS_MAP
+        side – "BUY" | "SELL"
+    """
     s = signal["symbol"].upper()
     if s.endswith("_LONG"):
-        return s[:-5], "BUY"
+        raw_symbol = s[:-5]
+        return _resolve_alias(raw_symbol), "BUY"
     if s.endswith("_SHORT"):
-        return s[:-6], "SELL"
+        raw_symbol = s[:-6]
+        return _resolve_alias(raw_symbol), "SELL"
     raise ValueError(f"Invalid signal format: {signal['symbol']}")
 
 
