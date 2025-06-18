@@ -15,12 +15,33 @@ _LOGGER = logging.getLogger(__name__)
 SIGNAL_API = "http://127.0.0.1:8000/api/analysis"
 
 
+async def _coerce(item):
+    """Convert API item to canonical dict with keys symbol/confidence."""
+    if isinstance(item, dict):
+        return {"symbol": str(item.get("symbol")), "confidence": float(item.get("confidence", 0))}
+    # assume string like "PEPEUSDT_LONG 0.88" or comma-separated
+    if isinstance(item, str):
+        parts = item.replace(",", " ").split()
+        if len(parts) >= 2:
+            try:
+                conf = float(parts[-1])
+                symbol = " ".join(parts[:-1])
+                return {"symbol": symbol, "confidence": conf}
+            except ValueError:
+                return None
+    return None
+
 async def fetch_signals(conf_threshold: float = 0.7) -> List[dict]:
-    """Return list of raw signal dicts with confidence >= threshold."""
+    """Return list of signal dicts meeting confidence threshold, robust to format."""
     async with aiohttp.ClientSession() as s:
         async with s.get(SIGNAL_API, timeout=10) as resp:
-            data = await resp.json()
-    return [item for item in data if item.get("confidence", 0) >= conf_threshold]
+            try:
+                raw = await resp.json(content_type=None)
+            except Exception:
+                text = await resp.text()
+                raw = text.strip().splitlines()
+    coerced = filter(None, (_coerce(i) for i in raw))
+    return [d for d in coerced if d["confidence"] >= conf_threshold]
 
 
 async def process_signals():
