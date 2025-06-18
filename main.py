@@ -24,7 +24,7 @@ scheduler = AsyncIOScheduler()
 
 @app.on_event("startup")
 async def startup_event():
-    scheduler.add_job(process_signals, "interval", minutes=15)
+    scheduler.add_job(process_signals, "interval", minutes=5)
     scheduler.start()
 
 
