@@ -32,16 +32,33 @@ async def _coerce(item):
     return None
 
 async def fetch_signals(conf_threshold: float = 0.7) -> List[dict]:
-    """Return list of signal dicts meeting confidence threshold, robust to format."""
+    """Return list of signal dicts meeting confidence threshold."""
     async with aiohttp.ClientSession() as s:
         async with s.get(SIGNAL_API, timeout=10) as resp:
-            try:
-                raw = await resp.json(content_type=None)
-            except Exception:
-                text = await resp.text()
-                raw = text.strip().splitlines()
-    coerced = filter(None, (_coerce(i) for i in raw))
-    return [d for d in coerced if d["confidence"] >= conf_threshold]
+            data = await resp.json()
+    
+    # Handle new JSON format with opportunities array
+    if "opportunities" in data:
+        opportunities = data["opportunities"]
+        signals = []
+        for opp in opportunities:
+            if opp.get("probability", 0) >= conf_threshold:
+                # Convert model_id like "BOMEUSDT_long_v1750166329" to "BOMEUSDT_LONG"
+                model_id = opp.get("model_id", "")
+                if "_long_" in model_id:
+                    symbol = model_id.split("_long_")[0] + "_LONG"
+                elif "_short_" in model_id:
+                    symbol = model_id.split("_short_")[0] + "_SHORT"
+                else:
+                    continue
+                signals.append({
+                    "symbol": symbol,
+                    "confidence": float(opp["probability"])
+                })
+        return signals
+    
+    # Fallback for old format
+    return [item for item in data if item.get("confidence", 0) >= conf_threshold]
 
 
 async def process_signals():
