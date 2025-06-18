@@ -122,6 +122,33 @@ async def process_signals():
         _LOGGER.exception("Trade cycle fatal error: %s", e)
 
 
+async def get_proper_quantity(client: BinanceClient, symbol: str, notional: float) -> float:
+    """Get properly rounded quantity based on Binance exchange info."""
+    try:
+        symbol_info = await client.get_symbol_info(symbol)
+        for filter_info in symbol_info["filters"]:
+            if filter_info["filterType"] == "LOT_SIZE":
+                step_size = float(filter_info["stepSize"])
+                mark_price = await client.get_mark_price(symbol)
+                raw_qty = notional / mark_price
+                # Round down to nearest step_size
+                qty = int(raw_qty / step_size) * step_size
+                _LOGGER.info("Symbol %s: stepSize=%.8f, raw_qty=%.6f, final_qty=%.6f", 
+                           symbol, step_size, raw_qty, qty)
+                return qty
+    except Exception as e:
+        _LOGGER.warning("Failed to get precision for %s: %s, using fallback", symbol, e)
+        # Fallback: use more conservative rounding
+        mark_price = await client.get_mark_price(symbol)
+        raw_qty = notional / mark_price
+        if raw_qty >= 1000:
+            return float(int(raw_qty))  # Round to whole numbers for large quantities
+        elif raw_qty >= 10:
+            return round(raw_qty, 1)    # 1 decimal place
+        else:
+            return round(raw_qty, 3)    # 3 decimal places for small quantities
+
+
 async def open_position(client: BinanceClient, symbol: str, side: str):
     """Open a position with fixed sizing and place protective stop-loss."""
     _LOGGER.info("Opening position for %s %s", side, symbol)
@@ -135,20 +162,18 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     _LOGGER.info("Current wallet balance: %.2f USDT", balance)
     
     notional = balance * FIXED_PCT_PER_TRADE * LEVERAGE  # USDT value
-    mark_price = await client.get_mark_price(symbol)
-    quantity = round_qty(symbol, notional / mark_price)
+    quantity = await get_proper_quantity(client, symbol, notional)
     
     if quantity == 0:
         _LOGGER.warning("Calculated quantity is 0 for %s - skipping", symbol)
         return
         
-    _LOGGER.info("Calculated position size: %.6f %s (mark price: %.6f)", 
-                quantity, symbol, mark_price)
+    _LOGGER.info("Calculated position size: %.6f %s", quantity, symbol)
     
     # Place market order
     _LOGGER.info("Placing MARKET %s order: %s qty=%.6f", side, symbol, quantity)
     entry_resp = await client.place_market_order(symbol, side, quantity)
-    entry_price = float(entry_resp.get("avgPrice", mark_price))
+    entry_price = float(entry_resp.get("avgPrice", await client.get_mark_price(symbol)))
     _LOGGER.info("Market order filled: %s at price %.6f", 
                 entry_resp.get("orderId", "N/A"), entry_price)
     

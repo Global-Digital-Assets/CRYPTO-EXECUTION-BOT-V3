@@ -105,6 +105,18 @@ class BinanceClient:
             params["workingType"] = working_type or "MARK_PRICE"
         return await self._request("POST", "/fapi/v1/order", signed=True, params=params)
 
+    async def get_exchange_info(self) -> Dict[str, Any]:
+        """Get exchange info for symbol precision."""
+        return await self._request("GET", "/fapi/v1/exchangeInfo", signed=False)
+
+    async def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+        """Get specific symbol trading rules."""
+        info = await self.get_exchange_info()
+        for s in info["symbols"]:
+            if s["symbol"] == symbol:
+                return s
+        raise ValueError(f"Symbol {symbol} not found in exchange info")
+
     # Utility wrappers
     async def current_positions(self) -> List[Dict[str, Any]]:
         acc = await self.get_account_info()
