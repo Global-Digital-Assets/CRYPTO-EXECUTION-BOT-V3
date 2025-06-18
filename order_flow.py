@@ -24,28 +24,41 @@ async def fetch_signals(conf_threshold: float = 0.7) -> List[dict]:
 
 
 async def process_signals():
-    async with BinanceClient() as client:
-        positions = await client.current_positions()
-        open_symbols = {p["symbol"] for p in positions}
-        margin_pct = await client.margin_usage_pct()
-        if margin_pct >= MAX_CONCURRENT_POSITIONS * (100 / MAX_CONCURRENT_POSITIONS):
-            _LOGGER.info("Margin usage %.2f%% ≥ cap – skipping cycle", margin_pct)
-            return
+    """Main trade cycle – robust against external failures."""
+    try:
+        async with BinanceClient() as client:
+            positions = await client.current_positions()
+            open_symbols = {p["symbol"] for p in positions}
+            margin_pct = await client.margin_usage_pct()
+            if margin_pct >= MAX_CONCURRENT_POSITIONS * (100 / MAX_CONCURRENT_POSITIONS):
+                _LOGGER.info("Margin usage %.2f%% ≥ cap – skipping cycle", margin_pct)
+                return
 
-        signals = await fetch_signals()
-        for sig in signals:
-            symbol, side = parse_signal(sig)
-            if symbol in open_symbols:
-                _LOGGER.info("%s already open – skipping", symbol)
-                continue
-            if len(open_symbols) >= MAX_CONCURRENT_POSITIONS:
-                _LOGGER.info("Positions cap hit – skipping remaining signals")
-                break
             try:
-                await open_position(client, symbol, side)
-                open_symbols.add(symbol)
+                signals = await fetch_signals()
             except Exception as e:
-                _LOGGER.exception("Failed to open %s: %s", symbol, e)
+                _LOGGER.error("Fetch signals failed: %s", e)
+                return
+
+            if not signals:
+                _LOGGER.info("No qualifying signals this cycle")
+                return
+
+            for sig in signals:
+                symbol, side = parse_signal(sig)
+                if symbol in open_symbols:
+                    _LOGGER.info("%s already open – skipping", symbol)
+                    continue
+                if len(open_symbols) >= MAX_CONCURRENT_POSITIONS:
+                    _LOGGER.info("Positions cap hit – skipping remaining signals")
+                    break
+                try:
+                    await open_position(client, symbol, side)
+                    open_symbols.add(symbol)
+                except Exception as e:
+                    _LOGGER.exception("Failed to open %s: %s", symbol, e)
+    except Exception as e:
+        _LOGGER.exception("Trade cycle fatal error: %s", e)
 
 
 async def open_position(client: BinanceClient, symbol: str, side: str):
