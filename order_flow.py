@@ -1,3 +1,84 @@
+# Circuit breaker state
+_consecutive_failures = 0
+_circuit_breaker_triggered = False
+MAX_CONSECUTIVE_FAILURES = 3
+
+def reset_circuit_breaker():
+    """Reset circuit breaker on successful trade."""
+    global _consecutive_failures, _circuit_breaker_triggered
+    _consecutive_failures = 0
+    _circuit_breaker_triggered = False
+
+def increment_failure_count():
+    """Increment failure count and trigger circuit breaker if needed."""
+    global _consecutive_failures, _circuit_breaker_triggered
+    _consecutive_failures += 1
+    if _consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+        _circuit_breaker_triggered = True
+        _LOGGER.error("🚨 CIRCUIT BREAKER TRIGGERED: %d consecutive failures - STOPPING TRADES", 
+                     _consecutive_failures)
+
+def is_circuit_breaker_active():
+    """Check if circuit breaker is active."""
+    return _circuit_breaker_triggered
+
+def validate_order_params(symbol: str, quantity: float, entry_price: float, sl_price: float) -> bool:
+    """Validate order parameters before placing trades."""
+    if not symbol or len(symbol) < 3:
+        _LOGGER.error("🚨 INVALID SYMBOL: '%s'", symbol)
+        return False
+        
+    if quantity <= 0:
+        _LOGGER.error("🚨 INVALID QUANTITY: %.8f for %s", quantity, symbol)
+        return False
+        
+    if entry_price <= 0:
+        _LOGGER.error("🚨 INVALID ENTRY PRICE: %.8f for %s", entry_price, symbol)
+        return False
+        
+    if sl_price <= 0:
+        _LOGGER.error("🚨 INVALID STOP-LOSS PRICE: %.8f for %s", sl_price, symbol)
+        return False
+        
+    _LOGGER.info("✅ Order validation passed: %s qty=%.2f entry=%.8f sl=%.8f", 
+                symbol, quantity, entry_price, sl_price)
+    return True
+
+# Balance monitoring state
+_initial_balance = None
+_balance_alert_threshold = 0.05  # 5% drop
+
+async def initialize_balance_monitoring(client: BinanceClient):
+    """Initialize balance monitoring with starting balance."""
+    global _initial_balance
+    try:
+        balance_data = await client.wallet_balance()
+        _initial_balance = float(balance_data.get("balance", 0))
+        _LOGGER.info("📊 Balance monitoring initialized: $%.2f USDT", _initial_balance)
+    except Exception as e:
+        _LOGGER.error("Failed to initialize balance monitoring: %s", e)
+        _initial_balance = None
+
+async def check_balance_alert(client: BinanceClient):
+    """Check if balance has dropped significantly and alert."""
+    global _initial_balance
+    if _initial_balance is None:
+        return
+        
+    try:
+        balance_data = await client.wallet_balance()
+        current_balance = float(balance_data.get("balance", 0))
+        balance_change_pct = ((current_balance - _initial_balance) / _initial_balance) * 100
+        
+        if balance_change_pct <= -(_balance_alert_threshold * 100):
+            _LOGGER.error("🚨 BALANCE ALERT: %.2f%% drop detected! Start: $%.2f, Current: $%.2f", 
+                         abs(balance_change_pct), _initial_balance, current_balance)
+        else:
+            _LOGGER.info("💰 Balance: $%.2f (%.2f%% change)", current_balance, balance_change_pct)
+            
+    except Exception as e:
+        _LOGGER.error("Failed to check balance: %s", e)
+
 """Order flow: fetch signals, size position, place entry + SL."""
 from __future__ import annotations
 
@@ -71,9 +152,18 @@ async def fetch_signals(conf_threshold: float = 0.7) -> List[dict]:
 async def process_signals():
     """Main trade cycle – robust against external failures."""
     _LOGGER.info("=== STARTING TRADE CYCLE ===")
+    
+    # Check circuit breaker
+    if is_circuit_breaker_active():
+        _LOGGER.warning("🚨 Circuit breaker active - skipping trade cycle")
+        return
+    
     try:
         async with BinanceClient() as client:
             _LOGGER.info("Connected to Binance client")
+            
+            # Initialize balance monitoring once per cycle
+            await initialize_balance_monitoring(client)
             
             positions = await client.current_positions()
             open_symbols = {p["symbol"] for p in positions}
@@ -113,8 +203,10 @@ async def process_signals():
                     _LOGGER.info("Opening position: %s %s", side, symbol)
                     await open_position(client, symbol, side)
                     open_symbols.add(symbol)
+                    reset_circuit_breaker()  # Reset on successful trade
                     _LOGGER.info("✅ Successfully opened %s %s", side, symbol)
                 except Exception as e:
+                    increment_failure_count()  # Count failures
                     _LOGGER.exception("Failed to open %s: %s", symbol, e)
                     
         _LOGGER.info("=== TRADE CYCLE COMPLETE ===")
@@ -213,15 +305,11 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     
     sl_price = await get_proper_price(client, symbol, sl_price)
     
-    # Validate prices before placing orders
-    if entry_price <= 0:
-        _LOGGER.error("Invalid entry price %.8f - skipping position", entry_price)
+    # Validate all order parameters before proceeding
+    if not validate_order_params(symbol, quantity, entry_price, sl_price):
+        increment_failure_count()  # Count validation failure
         return
-        
-    if sl_price <= 0:
-        _LOGGER.error("Invalid SL price %.8f - skipping position", sl_price) 
-        return
-        
+    
     # Calculate actual SL distance for verification
     if side == "BUY":
         actual_sl_pct = ((entry_price - sl_price) / entry_price) * 100
@@ -249,6 +337,9 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
         _LOGGER.info("Stop-loss order placed: %s", sl_resp.get("orderId", "N/A"))
     else:
         _LOGGER.error("Invalid SL price %.6f - skipping SL placement", sl_price)
+    
+    # Check balance alert
+    await check_balance_alert(client)
     
     _LOGGER.info("✅ Position opened: %s %s qty=%.6f entry=%.6f sl=%.6f", 
                 side, symbol, quantity, entry_price, sl_price)
