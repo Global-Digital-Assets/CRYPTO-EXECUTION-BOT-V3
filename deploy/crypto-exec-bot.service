@@ -1,0 +1,17 @@
+[Unit]
+Description=Binance Futures Execution Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/crypto-exec-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/crypto-exec-bot/venv/bin/python run_bot.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/crypto-exec-bot/bot.log
+StandardError=append:/opt/crypto-exec-bot/bot.log
+
+[Install]
+WantedBy=multi-user.target
