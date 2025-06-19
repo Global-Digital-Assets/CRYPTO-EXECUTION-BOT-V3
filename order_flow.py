@@ -299,9 +299,9 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     # Calculate and place stop-loss
     sl_side = "SELL" if side == "BUY" else "BUY"
     if side == "BUY":
-        sl_price = entry_price * (1 - STOP_LOSS_PCT / 100)
+        sl_price = entry_price * (1 - STOP_LOSS_PCT)
     else:
-        sl_price = entry_price * (1 + STOP_LOSS_PCT / 100)
+        sl_price = entry_price * (1 + STOP_LOSS_PCT)
     
     sl_price = await get_proper_price(client, symbol, sl_price)
     
