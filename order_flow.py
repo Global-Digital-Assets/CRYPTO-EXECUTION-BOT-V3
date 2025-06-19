@@ -81,6 +81,7 @@ async def check_balance_alert(client: BinanceClient):
         _LOGGER.error("Failed to check balance: %s", e)
 
 import logging
+import time
 from typing import List
 
 import aiohttp
@@ -90,6 +91,11 @@ from risk import FIXED_PCT_PER_TRADE, LEVERAGE, MAX_CONCURRENT_POSITIONS, STOP_L
 from utils import parse_signal, round_price, round_qty
 
 _LOGGER = logging.getLogger(__name__)
+
+# --- Cool-down config
+_COOLDOWN_SEC = 120  # 2-minute buffer before re-entry
+_last_closed: dict[str, float] = {}
+_prev_open: set[str] = set()
 
 SIGNAL_API = "http://127.0.0.1:8000/api/analysis"
 
