@@ -257,9 +257,30 @@ async def get_proper_price(client: BinanceClient, symbol: str, price: float) -> 
         _LOGGER.warning("Failed to get price precision for %s: %s, using fallback", symbol, e)
         # Fallback: round to 6 decimal places
         return round(price, 6)
-    
-    # If no PRICE_FILTER found, use fallback
-    return round(price, 6)
+
+
+async def place_stop_loss_with_retry(client: BinanceClient, symbol: str, side: str, quantity: float, base_price: float) -> None:
+    """Place stop-loss order, retrying with ±tick adjustments if precision error -1111 occurs."""
+    symbol_info = await client.get_symbol_info(symbol)
+    tick_size = None
+    for f in symbol_info["filters"]:
+        if f["filterType"] == "PRICE_FILTER":
+            tick_size = float(f["tickSize"])
+            break
+    tick_size = tick_size or 0.0
+    bumps = (0, 1, -1, 2, -2)
+    for bump in bumps:
+        try:
+            price = base_price + bump * tick_size
+            return await client.place_market_order(
+                symbol, side, quantity, reduce_only=True, stop_price=price
+            )
+        except RuntimeError as e:
+            if "-1111" not in str(e):
+                raise  # other Binance error, bubble up
+            _LOGGER.warning("Precision error on SL price %.8f for %s (bump %d). Retrying...", price, symbol, bump)
+            continue
+    raise RuntimeError("Unable to place stop-loss after precision retries for %s" % symbol)
 
 
 async def open_position(client: BinanceClient, symbol: str, side: str):
@@ -330,10 +351,7 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     
     # Only place SL if we have a valid price
     if sl_price > 0:
-        sl_resp = await client.place_market_order(
-            symbol, sl_side, quantity, 
-            reduce_only=True, stop_price=sl_price
-        )
+        sl_resp = await place_stop_loss_with_retry(client, symbol, sl_side, quantity, sl_price)
         _LOGGER.info("Stop-loss order placed: %s", sl_resp.get("orderId", "N/A"))
     else:
         _LOGGER.error("Invalid SL price %.6f - skipping SL placement", sl_price)
