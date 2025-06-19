@@ -266,7 +266,7 @@ async def place_stop_loss_with_retry(client: BinanceClient, symbol: str, side: s
             tick_size = float(f["tickSize"])
             break
     tick_size = tick_size or 0.0
-    bumps = (0, 1, -1, 2, -2)
+    bumps = [0] + list(range(1, 11)) + list(range(-1, -11, -1))  # broaden search ±10 ticks
     for bump in bumps:
         try:
             price = base_price + bump * tick_size
@@ -278,7 +278,11 @@ async def place_stop_loss_with_retry(client: BinanceClient, symbol: str, side: s
                 raise  # other Binance error, bubble up
             _LOGGER.warning("Precision error on SL price %.8f for %s (bump %d). Retrying...", price, symbol, bump)
             continue
-    raise RuntimeError("Unable to place stop-loss after precision retries for %s" % symbol)
+    _LOGGER.error("❌ Unable to place stop-loss for %s after ±10 ticks – sending reduce-only MARKET close", symbol)
+    try:
+        return await client.place_market_order(symbol, side, quantity, reduce_only=True)
+    except Exception as e2:
+        raise RuntimeError(f"Stop-loss & emergency close both failed for {symbol}: {e2}")
 
 
 async def open_position(client: BinanceClient, symbol: str, side: str):
