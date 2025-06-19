@@ -173,7 +173,13 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     # Place market order
     _LOGGER.info("Placing MARKET %s order: %s qty=%.6f", side, symbol, quantity)
     entry_resp = await client.place_market_order(symbol, side, quantity)
-    entry_price = float(entry_resp.get("avgPrice", await client.get_mark_price(symbol)))
+    
+    # Get actual fill price - use mark price if avgPrice is not available
+    entry_price = float(entry_resp.get("avgPrice") or 0)
+    if entry_price == 0:
+        entry_price = await client.get_mark_price(symbol)
+        _LOGGER.warning("avgPrice not available, using mark price: %.6f", entry_price)
+    
     _LOGGER.info("Market order filled: %s at price %.6f", 
                 entry_resp.get("orderId", "N/A"), entry_price)
     
@@ -185,13 +191,18 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
         sl_price = entry_price * (1 + STOP_LOSS_PCT / 100)
     
     sl_price = round_price(symbol, sl_price)
-    _LOGGER.info("Placing SL %s order at %.6f (%.1f%% from entry)", 
-                sl_side, sl_price, STOP_LOSS_PCT)
+    _LOGGER.info("Placing SL %s order at %.6f (%.1f%% from entry %.6f)", 
+                sl_side, sl_price, STOP_LOSS_PCT, entry_price)
     
-    sl_resp = await client.place_market_order(
-        symbol, sl_side, quantity, 
-        reduce_only=True, stop_price=sl_price
-    )
-    _LOGGER.info("Stop-loss order placed: %s", sl_resp.get("orderId", "N/A"))
+    # Only place SL if we have a valid price
+    if sl_price > 0:
+        sl_resp = await client.place_market_order(
+            symbol, sl_side, quantity, 
+            reduce_only=True, stop_price=sl_price
+        )
+        _LOGGER.info("Stop-loss order placed: %s", sl_resp.get("orderId", "N/A"))
+    else:
+        _LOGGER.error("Invalid SL price %.6f - skipping SL placement", sl_price)
+    
     _LOGGER.info("✅ Position opened: %s %s qty=%.6f entry=%.6f sl=%.6f", 
                 side, symbol, quantity, entry_price, sl_price)
