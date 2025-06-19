@@ -164,6 +164,14 @@ async def process_signals():
             await initialize_balance_monitoring(client)
             
             positions = await client.current_positions()
+            global _prev_open
+            # record recently closed symbols for cooldown
+            current_open = {p["symbol"] for p in positions}
+            just_closed = _prev_open - current_open
+            now_ts = time.time()
+            for sym in just_closed:
+                _last_closed[sym] = now_ts
+            _prev_open = current_open
             open_symbols = {p["symbol"] for p in positions}
             _LOGGER.info("Current positions: %d open (%s)", len(open_symbols), list(open_symbols))
             
@@ -191,6 +199,10 @@ async def process_signals():
                 _LOGGER.info("Evaluating signal: %s %s (confidence: %.3f)", 
                            side, symbol, sig["confidence"])
                 
+                # Cool-down check
+                if symbol in _last_closed and (time.time() - _last_closed[symbol]) < _COOLDOWN_SEC:
+                    _LOGGER.info("%s within cooldown window – skipping", symbol)
+                    continue
                 if symbol in open_symbols:
                     _LOGGER.info("%s already open – skipping", symbol)
                     continue
