@@ -149,6 +149,27 @@ async def get_proper_quantity(client: BinanceClient, symbol: str, notional: floa
             return round(raw_qty, 3)    # 3 decimal places for small quantities
 
 
+async def get_proper_price(client: BinanceClient, symbol: str, price: float) -> float:
+    """Get properly rounded price based on Binance exchange info."""
+    try:
+        symbol_info = await client.get_symbol_info(symbol)
+        for filter_info in symbol_info["filters"]:
+            if filter_info["filterType"] == "PRICE_FILTER":
+                tick_size = float(filter_info["tickSize"])
+                # Round price to nearest tick_size
+                rounded_price = round(price / tick_size) * tick_size
+                _LOGGER.info("Symbol %s: tickSize=%.8f, raw_price=%.8f, rounded_price=%.8f", 
+                           symbol, tick_size, price, rounded_price)
+                return rounded_price
+    except Exception as e:
+        _LOGGER.warning("Failed to get price precision for %s: %s, using fallback", symbol, e)
+        # Fallback: round to 6 decimal places
+        return round(price, 6)
+    
+    # If no PRICE_FILTER found, use fallback
+    return round(price, 6)
+
+
 async def open_position(client: BinanceClient, symbol: str, side: str):
     """Open a position with fixed sizing and place protective stop-loss."""
     _LOGGER.info("Opening position for %s %s", side, symbol)
@@ -190,7 +211,32 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
     else:
         sl_price = entry_price * (1 + STOP_LOSS_PCT / 100)
     
-    sl_price = round_price(symbol, sl_price)
+    sl_price = await get_proper_price(client, symbol, sl_price)
+    
+    # Validate prices before placing orders
+    if entry_price <= 0:
+        _LOGGER.error("Invalid entry price %.8f - skipping position", entry_price)
+        return
+        
+    if sl_price <= 0:
+        _LOGGER.error("Invalid SL price %.8f - skipping position", sl_price) 
+        return
+        
+    # Calculate actual SL distance for verification
+    if side == "BUY":
+        actual_sl_pct = ((entry_price - sl_price) / entry_price) * 100
+    else:
+        actual_sl_pct = ((sl_price - entry_price) / entry_price) * 100
+        
+    _LOGGER.info("🎯 STOP-LOSS VERIFICATION: target=%.1f%%, actual=%.2f%%, entry=%.8f, sl=%.8f",
+                STOP_LOSS_PCT, actual_sl_pct, entry_price, sl_price)
+    
+    # Safety check: if SL is more than 2x target, abort
+    if actual_sl_pct > STOP_LOSS_PCT * 2:
+        _LOGGER.error("🚨 SL TOO FAR: %.2f%% > %.1f%% - ABORTING TRADE", 
+                     actual_sl_pct, STOP_LOSS_PCT * 2)
+        return
+    
     _LOGGER.info("Placing SL %s order at %.6f (%.1f%% from entry %.6f)", 
                 sl_side, sl_price, STOP_LOSS_PCT, entry_price)
     
