@@ -229,16 +229,16 @@ async def open_position(client: BinanceClient, symbol: str, side: str):
         actual_sl_pct = ((sl_price - entry_price) / entry_price) * 100
         
     _LOGGER.info("🎯 STOP-LOSS VERIFICATION: target=%.1f%%, actual=%.2f%%, entry=%.8f, sl=%.8f",
-                STOP_LOSS_PCT, actual_sl_pct, entry_price, sl_price)
+                STOP_LOSS_PCT * 100, actual_sl_pct, entry_price, sl_price)
     
     # Safety check: if SL is more than 2x target, abort
-    if actual_sl_pct > STOP_LOSS_PCT * 2:
+    if actual_sl_pct > (STOP_LOSS_PCT * 100) * 2:
         _LOGGER.error("🚨 SL TOO FAR: %.2f%% > %.1f%% - ABORTING TRADE", 
-                     actual_sl_pct, STOP_LOSS_PCT * 2)
+                     actual_sl_pct, STOP_LOSS_PCT * 2 * 100)
         return
     
     _LOGGER.info("Placing SL %s order at %.6f (%.1f%% from entry %.6f)", 
-                sl_side, sl_price, STOP_LOSS_PCT, entry_price)
+                sl_side, sl_price, STOP_LOSS_PCT * 100, entry_price)
     
     # Only place SL if we have a valid price
     if sl_price > 0:
