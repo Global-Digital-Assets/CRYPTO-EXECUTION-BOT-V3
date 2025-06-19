@@ -1,3 +1,6 @@
+"""Order flow: fetch signals, size position, place entry + SL."""
+from __future__ import annotations
+
 # Circuit breaker state
 _consecutive_failures = 0
 _circuit_breaker_triggered = False
@@ -78,9 +81,6 @@ async def check_balance_alert(client: BinanceClient):
             
     except Exception as e:
         _LOGGER.error("Failed to check balance: %s", e)
-
-"""Order flow: fetch signals, size position, place entry + SL."""
-from __future__ import annotations
 
 import logging
 from typing import List
