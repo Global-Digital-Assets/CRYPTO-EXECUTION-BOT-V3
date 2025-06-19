@@ -123,6 +123,7 @@ class BinanceClient:
         return [p for p in acc["positions"] if float(p["positionAmt"]) != 0.0]
 
     async def wallet_balance(self) -> float:
+        """Return wallet USDT balance as float."""
         acc = await self.get_account_info()
         return float(acc["totalWalletBalance"])
 

@@ -55,8 +55,7 @@ async def initialize_balance_monitoring(client: BinanceClient):
     """Initialize balance monitoring with starting balance."""
     global _initial_balance
     try:
-        balance_data = await client.wallet_balance()
-        _initial_balance = float(balance_data.get("balance", 0))
+        _initial_balance = float(await client.wallet_balance())
         _LOGGER.info("📊 Balance monitoring initialized: $%.2f USDT", _initial_balance)
     except Exception as e:
         _LOGGER.error("Failed to initialize balance monitoring: %s", e)
@@ -69,8 +68,7 @@ async def check_balance_alert(client: BinanceClient):
         return
         
     try:
-        balance_data = await client.wallet_balance()
-        current_balance = float(balance_data.get("balance", 0))
+        current_balance = float(await client.wallet_balance())
         balance_change_pct = ((current_balance - _initial_balance) / _initial_balance) * 100
         
         if balance_change_pct <= -(_balance_alert_threshold * 100):
