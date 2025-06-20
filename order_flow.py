@@ -116,7 +116,7 @@ async def _coerce(item):
                 return None
     return None
 
-async def fetch_signals(conf_threshold: float = 0.7) -> List[dict]:
+async def fetch_signals(conf_threshold: float = 0.6) -> List[dict]:
     """Return list of signal dicts meeting confidence threshold."""
     _LOGGER.info("Fetching signals from %s", SIGNAL_API)
     
