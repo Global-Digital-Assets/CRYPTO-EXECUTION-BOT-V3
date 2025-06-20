@@ -1,10 +1,12 @@
 """Order flow: fetch signals, size position, place entry + SL."""
 from __future__ import annotations
+import time
 
 # Circuit breaker state
 _consecutive_failures = 0
 _circuit_breaker_triggered = False
 MAX_CONSECUTIVE_FAILURES = 3
+_breaker_ts = 0  # epoch when breaker was triggered
 
 def reset_circuit_breaker():
     """Reset circuit breaker on successful trade."""
@@ -18,12 +20,18 @@ def increment_failure_count():
     _consecutive_failures += 1
     if _consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
         _circuit_breaker_triggered = True
+        global _breaker_ts
+        _breaker_ts = time.time()
         _LOGGER.error("🚨 CIRCUIT BREAKER TRIGGERED: %d consecutive failures - STOPPING TRADES", 
                      _consecutive_failures)
 
 def is_circuit_breaker_active():
-    """Check if circuit breaker is active."""
+    """Check if circuit breaker is active; auto-reset after 15 min."""
+    if _circuit_breaker_triggered and (time.time() - _breaker_ts) >= 900:
+        _LOGGER.warning("⚠️ Auto-resetting circuit breaker after 15 minutes idle")
+        reset_circuit_breaker()
     return _circuit_breaker_triggered
+
 
 def validate_order_params(symbol: str, quantity: float, entry_price: float, sl_price: float) -> bool:
     """Validate order parameters before placing trades."""
