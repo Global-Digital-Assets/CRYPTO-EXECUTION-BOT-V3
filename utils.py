@@ -41,11 +41,15 @@ def round_qty(symbol: str, qty: float) -> float:
 
 # Some Binance futures contracts are issued in 100/1000-multiples (e.g. 1000PEPEUSDT).
 # The signal service might emit the plain symbol (PEPEUSDT). Map those here.
+# Map plain-token signals to the relevant 100/1000-multiplier contracts **only** where Binance actually lists them
+# Keep this list tight to avoid invalid-symbol errors.
 ALIAS_MAP = {
     "PEPEUSDT": "1000PEPEUSDT",
-    "ORDIUSDT": "1000ORDIUSDT",
+    "FLOKIUSDT": "1000FLOKIUSDT",
+    "SHIBUSDT": "1000SHIBUSDT",
     "BONKUSDT": "1000BONKUSDT",
-    "WIFUSDT": "1000WIFUSDT",
+    "LUNCUSDT": "1000LUNCUSDT",
+    "SATSUSDT": "1000SATSUSDT",
 }
 
 
