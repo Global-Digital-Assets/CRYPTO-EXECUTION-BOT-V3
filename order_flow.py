@@ -91,6 +91,7 @@ async def check_balance_alert(client: BinanceClient):
 import logging
 import time
 from typing import List
+from decimal import Decimal, ROUND_DOWN
 
 import aiohttp
 
@@ -244,13 +245,18 @@ async def get_proper_quantity(client: BinanceClient, symbol: str, notional: floa
         symbol_info = await client.get_symbol_info(symbol)
         for filter_info in symbol_info["filters"]:
             if filter_info["filterType"] == "LOT_SIZE":
-                step_size = float(filter_info["stepSize"])
+                step_size_str = filter_info["stepSize"]  # e.g. "0.001"
+                step_size_dec = Decimal(step_size_str)
+                decimals = abs(step_size_dec.as_tuple().exponent)
                 mark_price = await client.get_mark_price(symbol)
-                raw_qty = notional / mark_price
-                # Round down to nearest step_size
-                qty = int(raw_qty / step_size) * step_size
-                _LOGGER.info("Symbol %s: stepSize=%.8f, raw_qty=%.6f, final_qty=%.6f", 
-                           symbol, step_size, raw_qty, qty)
+                raw_qty = Decimal(str(notional / mark_price))
+                # floor to nearest multiple of step_size
+                multipliers = (raw_qty / step_size_dec).to_integral_value(rounding=ROUND_DOWN)
+                qty_dec = multipliers * step_size_dec
+                qty = float(qty_dec.quantize(step_size_dec))
+                _LOGGER.info(
+                    "Symbol %s: stepSize=%s, raw_qty=%s, final_qty=%s", symbol, step_size_str, raw_qty, qty_dec
+                )
                 return qty
     except Exception as e:
         _LOGGER.warning("Failed to get precision for %s: %s, using fallback", symbol, e)
